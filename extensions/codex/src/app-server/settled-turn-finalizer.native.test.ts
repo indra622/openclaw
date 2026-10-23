@@ -33,6 +33,7 @@ import {
   resolveCodexSupervisionAppServerRuntimeOptions,
   type CodexPluginConfig,
 } from "./config.js";
+import { createAttributedCodexAssistantMessage } from "./event-projector-assistant-message.js";
 import { setCodexTestToolFactory } from "./host-capability.test-support.js";
 import { buildCodexAppServerConnectionFingerprint } from "./plugin-app-cache-key.js";
 import { assertCodexThreadStartResponse } from "./protocol-validators.js";
@@ -57,6 +58,7 @@ import * as sharedClients from "./shared-client.js";
 import type { CodexAppServerClientFactory } from "./shared-client.js";
 import { runCodexAppServerSideQuestion } from "./side-question.js";
 import { attachSqliteSessionTarget } from "./sqlite-session.test-helpers.js";
+import { attachCodexMirrorIdentity } from "./upstream-prompt-provenance.js";
 import { CODEX_APP_SERVER_VERSION } from "./version.js";
 
 setupRunAttemptTestHooks();
@@ -296,6 +298,7 @@ type SummaryScenario = {
   preserveNativeModel?: boolean;
   prepared?: boolean;
   priorCount?: number;
+  unfinishedPrior?: "ordinary" | "oversized";
   hidden?: boolean;
   live?: boolean;
 };
@@ -638,6 +641,8 @@ it
     { label: "preserveNativeModel-only host profile", preserveNativeModel: true, prepared: false },
     { label: "ordinary user-home private host profile", homeScope: "user", prepared: false },
     { label: "long conversation", priorCount: 201 },
+    { label: "unfinished prior turn", unfinishedPrior: "ordinary" },
+    { label: "unfinished oversized prior turn", unfinishedPrior: "oversized" },
     { label: "hidden background notification", hidden: true },
     ...(LIVE
       ? [{ label: "hidden background notification with live provider", hidden: true, live: true }]
@@ -661,6 +666,7 @@ async function runSummary(
     preserveNativeModel = false,
     prepared = true,
     priorCount = 0,
+    unfinishedPrior,
     live = false,
     hidden = false,
   }: SummaryScenario,
@@ -719,6 +725,38 @@ async function runSummary(
       },
     });
   }
+  if (unfinishedPrior) {
+    await appendSessionTranscriptMessageByIdentity({
+      ...transcriptTarget(params),
+      message: attachCodexMirrorIdentity(
+        { role: "user", content: "Earlier unfinished work.", timestamp: 1 },
+        "unfinished-prior:prompt",
+      ),
+    });
+    const priorCall = createAttributedCodexAssistantMessage(
+      { modelId: NATIVE_MODEL, provider: "openai", api: "openai-responses" },
+      "",
+      { tokenUsage: undefined, aborted: false, promptError: null },
+    );
+    priorCall.content = [
+      { type: "toolCall", id: "unfinished-prior-call", name: "lookup", arguments: {} },
+    ];
+    priorCall.stopReason = "toolUse";
+    await appendSessionTranscriptMessageByIdentity({
+      ...transcriptTarget(params),
+      message: attachCodexMirrorIdentity(priorCall, "unfinished-prior:tool:pending:call"),
+    });
+    if (unfinishedPrior === "oversized") {
+      await appendSessionTranscriptMessageByIdentity({
+        ...transcriptTarget(params),
+        message: {
+          role: "user",
+          content: "x".repeat(65537),
+          timestamp: 2,
+        },
+      });
+    }
+  }
   fixture.setPhase("action");
   params.runId = "run-settled-action";
   if (hidden) {
@@ -750,6 +788,14 @@ async function runSummary(
   const context = settledAttempt.settledTurnFinalizationContext;
   if (!(context instanceof settledContext.CodexSettledTurnContext)) {
     throw new Error("Native turn lost its settled-tool evidence");
+  }
+  if (unfinishedPrior) {
+    expect(context.data[0]).toMatchObject({
+      content: [{ text: expect.stringContaining("Earlier conversation was omitted") }],
+    });
+    expect(context.data).not.toContainEqual(
+      expect.objectContaining({ call_id: "unfinished-prior-call" }),
+    );
   }
   if (hidden) {
     expect(context.data).toEqual(
