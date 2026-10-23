@@ -50,6 +50,14 @@ function createChannelsSnapshot(label: string): ChannelsStatusSnapshot {
   };
 }
 
+function createStaticChannelCapability(request: ReturnType<typeof vi.fn>) {
+  const { gateway } = createChannelGatewayFixture(() => ({
+    client: { request },
+    phase: "connected" as const,
+  }));
+  return createChannelCapability(gateway);
+}
+
 describe("channel readiness", () => {
   it("treats aggregate or account configuration as active", () => {
     const snapshot = createChannelsSnapshot("Test");
@@ -231,13 +239,7 @@ describe("channels controller WhatsApp wait", () => {
       qrDataUrl: string;
     }>();
     const request = vi.fn(() => pending.promise);
-    const client = { request };
-    const gateway = {
-      snapshot: { client, phase: "connected" },
-      subscribe: () => () => undefined,
-      subscribeEvents: () => () => undefined,
-    };
-    const channels = createChannelCapability(gateway as never);
+    const channels = createStaticChannelCapability(request);
 
     const wait = channels.waitWhatsApp();
     await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
@@ -269,11 +271,7 @@ describe("channels controller WhatsApp provider selection", () => {
       }
       return createChannelsSnapshot("refreshed");
     });
-    const channels = createChannelCapability({
-      snapshot: { client: { request }, phase: "connected" },
-      subscribe: () => () => undefined,
-      subscribeEvents: () => () => undefined,
-    } as never);
+    const channels = createStaticChannelCapability(request);
 
     await channels.startWhatsApp(false);
     await channels.waitWhatsApp();
@@ -298,11 +296,7 @@ describe("channels controller WhatsApp logout", () => {
         ? { cleared: false, loggedOut: false }
         : createChannelsSnapshot("refreshed"),
     );
-    const channels = createChannelCapability({
-      snapshot: { client: { request }, phase: "connected" },
-      subscribe: () => () => undefined,
-      subscribeEvents: () => () => undefined,
-    } as never);
+    const channels = createStaticChannelCapability(request);
     channels.state.whatsappLoginMessage = "Scan this QR.";
     channels.state.whatsappLoginQrDataUrl = "data:image/png;base64,current-qr";
     channels.state.whatsappLoginConnected = true;
@@ -329,11 +323,7 @@ describe("channels controller WhatsApp logout", () => {
         ? { cleared: true, loggedOut: true }
         : createChannelsSnapshot("refreshed"),
     );
-    const channels = createChannelCapability({
-      snapshot: { client: { request }, phase: "connected" },
-      subscribe: () => () => undefined,
-      subscribeEvents: () => () => undefined,
-    } as never);
+    const channels = createStaticChannelCapability(request);
     channels.state.whatsappLoginMessage = "Scan this QR.";
     channels.state.whatsappLoginQrDataUrl = "data:image/png;base64,current-qr";
     channels.state.whatsappLoginConnected = true;
@@ -374,11 +364,7 @@ describe("channels controller WhatsApp mutation failures", () => {
         }
         return createChannelsSnapshot("unexpected refresh");
       });
-      const channels = createChannelCapability({
-        snapshot: { client: { request }, phase: "connected" },
-        subscribe: () => () => undefined,
-        subscribeEvents: () => () => undefined,
-      } as never);
+      const channels = createStaticChannelCapability(request);
       channels.state.whatsappLoginQrDataUrl = "data:image/png;base64,current-qr";
       channels.state.whatsappLoginConnected = true;
       const updates: Array<{ busy: boolean; message: string | null }> = [];
@@ -443,11 +429,7 @@ describe("channels controller DM pairing", () => {
       }
       return {};
     });
-    const channels = createChannelCapability({
-      snapshot: { client: { request }, phase: "connected" },
-      subscribe: () => () => undefined,
-      subscribeEvents: () => () => undefined,
-    } as never);
+    const channels = createStaticChannelCapability(request);
 
     await channels.refreshPairing();
     expect(channels.state.pairingSnapshot?.requests).toHaveLength(1);
@@ -482,11 +464,7 @@ describe("channels controller DM pairing", () => {
       }
       return approvalResult.promise;
     });
-    const channels = createChannelCapability({
-      snapshot: { client: { request }, phase: "connected" },
-      subscribe: () => () => undefined,
-      subscribeEvents: () => () => undefined,
-    } as never);
+    const channels = createStaticChannelCapability(request);
     await channels.refreshPairing();
 
     const approval = channels.approvePairing({
@@ -530,11 +508,7 @@ describe("channels controller DM pairing", () => {
         commandOwnerBootstrap: "not-requested",
       };
     });
-    const channels = createChannelCapability({
-      snapshot: { client: { request }, phase: "connected" },
-      subscribe: () => () => undefined,
-      subscribeEvents: () => () => undefined,
-    } as never);
+    const channels = createStaticChannelCapability(request);
 
     const staleRefresh = channels.refreshPairing();
     const staleReceipt = channels.state.pairingRead!;
