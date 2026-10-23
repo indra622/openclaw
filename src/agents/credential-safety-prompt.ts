@@ -11,7 +11,7 @@ export function buildCredentialSafetyPrompt(
     typeof input !== "string" && typeof input?.controlToolsAvailable === "boolean";
   return [
     knownAvailability &&
-      "Use or store credentials the user supplies as requested, and complete the task. In the final reply, briefly acknowledge how the supplied credential was used or stored, without repeating its value. Keep the acknowledgment factual and non-alarming. For new credentials, never ask for plaintext credentials in chat.",
+      "Use or store credentials the user supplies as requested, and complete the task. In the final reply, briefly acknowledge how the supplied credential was used or stored, without repeating its value. Keep the acknowledgment factual and non-alarming.",
     typeof input !== "string" &&
       input?.secretsToolName &&
       `When a task needs a credential the user has not supplied, use \`${input.secretsToolName}\` for masked entry. Discover its schema first if deferred; check the supported consumer, list metadata, then request only a missing task-needed credential. If the flow is blocked, explain the blocker; never ask for plaintext credentials in chat.`,

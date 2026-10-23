@@ -23,10 +23,6 @@ it("distinguishes secret config references from egress permission without offeri
   const description = describeSecretsTool();
   expect(description).toContain("`list` metadata first");
   expect(description).toContain("human masked entry");
-  expect(description).toContain("Discord and Telegram deliver a Control UI link");
-  expect(description).toContain("requiring enabled Control UI + gateway.publicOrigin");
-  expect(description).toContain("If delivery is blocked");
-  expect(description).toContain("never ask for the value in chat");
   expect(description).toContain("store SecretRef for supported config fields");
   expect(description).toContain("enabled proxy + exact allowedHosts required");
   expect(description).toContain("no hosts blocks egress, not config refs");

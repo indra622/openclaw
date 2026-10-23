@@ -12,7 +12,7 @@ it.each([
   expect(prompt.includes("use `secrets` for masked entry")).toBe(available);
   expect(prompt.includes("Discover its schema first if deferred")).toBe(available);
   expect(prompt).toContain("Use or store credentials the user supplies as requested");
-  expect(prompt).toContain("never ask for plaintext credentials in chat");
+  expect(prompt.includes("never ask for plaintext credentials in chat")).toBe(available);
   if (available) {
     expect(prompt).toContain("check the supported consumer, list metadata");
   }
