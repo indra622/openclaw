@@ -30,6 +30,7 @@ export type SettingsSegmentedProps<T extends string, Label> = {
 } & (
   | {
       mode?: undefined;
+      ariaRequired?: boolean;
       onChange: (value: T, element: HTMLElement) => boolean | void;
       onReselect?: (value: T, element: HTMLElement) => void;
     }

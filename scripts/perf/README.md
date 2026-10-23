@@ -1,5 +1,60 @@
 # Team-shaped synthetic state
 
+## Background result lifecycle wait
+
+`background-result-wait-measure.ts` holds a synthetic session turn open while
+committing an automation result through the real controller and transcript
+writer. Run baseline and candidate concurrently with separate state directories
+and the same `--start-at` epoch, then swap CPU sets for the second pair:
+
+```sh
+node --expose-gc --trace-gc-nvp --import ./scripts/tsx.mjs \
+  scripts/perf/background-result-wait-measure.ts \
+  --state-dir /path/to/new-state --samples 6 --hold-ms 2000 --start-at <epoch-ms> \
+  --gc-log /path/to/capture.log > /path/to/capture.log 2>&1
+```
+
+`result.json` records persistence latency, the existing `lifecycleQueueWaitMs`
+diagnostic, custody after commit, and whether the turn is still running. A
+1.1-second completion-publication fixture makes both versions emit their slow
+operation diagnostic; it is excluded from persistence latency. This measures
+the controller/storage boundary, not model or whole-Gateway latency. Acceptance:
+queue wait no longer tracks the held turn, results persist within one second,
+and commit completion leaves no mutation custody. CPU, GC pauses, and event-loop
+samples are supporting context; apply the campaign's sample-count rules.
+
+## Plugin tool invocation scopes
+
+`plugin-gateway-scope-measure.ts` registers two synthetic plugins through the real
+registry API, alternating one tool factory resolution and sixteen prepared tool
+executions per synthetic turn. Every callback checks plugin identity, provenance,
+and registry, including after an asynchronous suspension. This is a source-owner
+measurement; synthetic turns do not represent whole Gateway or model latency.
+
+```sh
+node --expose-gc --trace-gc-nvp --import ./scripts/tsx.mjs \
+  scripts/perf/plugin-gateway-scope-measure.ts \
+  --turns 4000 --calls 16 --start-at <allocation-epoch-ms> \
+  --cpu-start-at <later-cpu-epoch-ms> --output /path/to/result.json \
+  --gc-log /path/to/capture.log > /path/to/capture.log 2>&1
+```
+
+Run on the approved benchmark host with task-owned `HOME`, `OPENCLAW_HOME`, and
+`TMPDIR`. Setup and warmup finish before `SCOPE_READY`. Allocation and unprofiled
+CPU passes have independent shared start deadlines; late preparation fails.
+Use concurrent baseline/candidate pairs under one quiet lock and the production
+guard, swapping the interleaved CPU sets in the next pair.
+
+The report includes collected-object allocation per invocation and synthetic
+turn, CPU and turn latency, total GC time, per-kind collection counts and pause
+tails/maxima, V8 trace promotion, and event-loop delay. Tails include sample counts;
+apply the campaign's sample-count and absolute/relative paired-delta rules. The
+default one-millisecond yield per turn permits event-loop sampling and is excluded
+from turn latency. A separate, unprofiled probe counts async-store frame installs
+for a synthetic turn and direct/nested calls to an owned plugin instance. Counts
+include the turn's outer Gateway scope. No instrumentation remains during the
+allocation or CPU passes. Raw allocation profiles accompany each result.
+
 ## Subagent maintenance capture
 
 `subagent-maintenance-capture-measure.ts` measures the production session

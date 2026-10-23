@@ -394,6 +394,7 @@ export function SettingsSegmented<T extends string>(props: SettingsSegmentedProp
           class={["settings-segmented", props.class]}
           role="radiogroup"
           aria-label={props.ariaLabel}
+          aria-required={props.mode !== "buttons" && props.ariaRequired ? "true" : undefined}
           aria-describedby={props.descriptionId}
           aria-orientation="horizontal"
         >
