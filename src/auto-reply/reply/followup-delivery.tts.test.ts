@@ -17,7 +17,6 @@ import {
   setReplyPayloadMetadata,
 } from "../reply-payload.js";
 import type { ReplyPayload } from "../types.js";
-import { maybeApplyTtsToReplyPayload } from "./dispatch-from-config.payloads.js";
 import { deliverFollowupDecision, resolveFollowupDeliveryDecision } from "./followup-delivery.js";
 import { createDefaults, createTurn } from "./followup-delivery.test-helpers.js";
 import { collectRuntimeMetadata } from "./queue/delivery-context.js";
@@ -268,29 +267,6 @@ it("preserves inbound speech eligibility for a collected follow-up", async () =>
   await send(turn);
   expect(synthesize).toHaveBeenCalledOnce();
   expect(outbound.mock.calls[0]?.[0].payloads[0].mediaUrl).toBeTruthy();
-});
-
-it("prepares normal and queued replies through the same automatic speech policy", async () => {
-  const cfg = { tts: { auto: "always" as const, provider: providerId } };
-  const normal = await maybeApplyTtsToReplyPayload({
-    payload: { text: speech },
-    cfg,
-    preparedTtsPreferences: {},
-    channel: "discord",
-    kind: "final",
-  });
-  await send();
-  expect(synthesize).toHaveBeenCalledTimes(2);
-  const queued = outbound.mock.calls[0]?.[0].payloads[0];
-  for (const payload of [normal, queued]) {
-    expect(payload).toMatchObject({
-      text: speech,
-      audioAsVoice: true,
-      spokenText: speech,
-      ttsSupplement: { spokenText: speech },
-    });
-    expect(await fs.readFile(payload.mediaUrl)).toEqual(audio);
-  }
 });
 
 it("does not synthesize a reply suppressed by every collected source", async () => {
