@@ -4,6 +4,10 @@ import { createDeferred } from "../../../../test/helpers/promise.js";
 import type { GatewayEventListener } from "../../api/gateway.ts";
 import type { ChannelsPairingListResult, ChannelsStatusSnapshot } from "../../api/types.ts";
 import {
+  createTestGatewayClient,
+  type GatewayRequestHandler,
+} from "../../test-helpers/gateway-client.ts";
+import {
   channelSnapshotEntryIsActive,
   channelSnapshotHasActiveChannel,
   createChannelCapability,
@@ -50,9 +54,10 @@ function createChannelsSnapshot(label: string): ChannelsStatusSnapshot {
   };
 }
 
-function createStaticChannelCapability(request: ReturnType<typeof vi.fn>) {
+function createStaticChannelCapability(request: GatewayRequestHandler) {
+  const client = createTestGatewayClient(request);
   const { gateway } = createChannelGatewayFixture(() => ({
-    client: { request },
+    client,
     phase: "connected" as const,
   }));
   return createChannelCapability(gateway);
