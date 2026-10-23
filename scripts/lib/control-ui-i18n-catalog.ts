@@ -17,14 +17,19 @@ import { registerChatCameraEnglish } from "../../ui/src/i18n/locales/en-chat-cam
 import { registerChatCiEnglish } from "../../ui/src/i18n/locales/en-chat-ci.ts";
 import { registerChatCommandResultsEnglish } from "../../ui/src/i18n/locales/en-chat-command-results.ts";
 import { registerChatComposerEnglish } from "../../ui/src/i18n/locales/en-chat-composer.ts";
+import { registerChatDetailsEnglish } from "../../ui/src/i18n/locales/en-chat-details.ts";
 import { registerChatGoalsEnglish } from "../../ui/src/i18n/locales/en-chat-goals.ts";
+import { registerChatMediaEnglish } from "../../ui/src/i18n/locales/en-chat-media.ts";
 import { registerChatMessageMetadataEnglish } from "../../ui/src/i18n/locales/en-chat-message-metadata.ts";
 import { registerChatProviderReviewEnglish } from "../../ui/src/i18n/locales/en-chat-provider-review.ts";
+import { registerChatQuestionsEnglish } from "../../ui/src/i18n/locales/en-chat-questions.ts";
 import { registerChatSessionEnglish } from "../../ui/src/i18n/locales/en-chat-session.ts";
 import { registerChatToolContentEnglish } from "../../ui/src/i18n/locales/en-chat-tool-content.ts";
+import { registerChatToolLabelsEnglish } from "../../ui/src/i18n/locales/en-chat-tool-labels.ts";
 import { registerClawsEnglish } from "../../ui/src/i18n/locales/en-claws.ts";
 import { registerCodeBlocksEnglish } from "../../ui/src/i18n/locales/en-code-blocks.ts";
 import { registerCommandPaletteEnglish } from "../../ui/src/i18n/locales/en-command-palette.ts";
+import { registerConnectionRecoveryEnglish } from "../../ui/src/i18n/locales/en-connection-recovery.ts";
 import { registerCronEnglish } from "../../ui/src/i18n/locales/en-cron.ts";
 import { registerDashboardsEnglish } from "../../ui/src/i18n/locales/en-dashboards.ts";
 import { registerDebugEnglish } from "../../ui/src/i18n/locales/en-debug.ts";
@@ -56,6 +61,7 @@ import { registerProcessesEnglish } from "../../ui/src/i18n/locales/en-processes
 import { registerProfileEnglish } from "../../ui/src/i18n/locales/en-profile.ts";
 import { registerSecretsStoreEnglish } from "../../ui/src/i18n/locales/en-secrets-store.ts";
 import { registerSessionMachineEnglish } from "../../ui/src/i18n/locales/en-session-machine.ts";
+import { registerSessionNavigationEnglish } from "../../ui/src/i18n/locales/en-session-navigation.ts";
 import { registerSessionOrganizationEnglish } from "../../ui/src/i18n/locales/en-session-organization.ts";
 import { registerSessionPeopleEnglish } from "../../ui/src/i18n/locales/en-session-people.ts";
 import { registerSessionPlacementEnglish } from "../../ui/src/i18n/locales/en-session-placement.ts";
@@ -105,14 +111,19 @@ const sourceFiles = [
   "en-chat-ci.ts",
   "en-chat-command-results.ts",
   "en-chat-composer.ts",
+  "en-chat-details.ts",
   "en-chat-goals.ts",
   "en-chat-message-metadata.ts",
+  "en-chat-media.ts",
   "en-chat-provider-review.ts",
+  "en-chat-questions.ts",
   "en-chat-session.ts",
   "en-chat-tool-content.ts",
+  "en-chat-tool-labels.ts",
   "en-claws.ts",
   "en-code-blocks.ts",
   "en-command-palette.ts",
+  "en-connection-recovery.ts",
   "en-cron.ts",
   "en-debug.ts",
   "en-desktop.ts",
@@ -134,6 +145,7 @@ const sourceFiles = [
   "en-model-setup.ts",
   "en-personal-instructions.ts",
   "en-session-machine.ts",
+  "en-session-navigation.ts",
   "en-session-organization.ts",
   "en-session-people.ts",
   "en-session-placement.ts",
@@ -193,9 +205,18 @@ export function loadControlUiSourceCatalog(): TranslationMap {
       Object.assign(sessionsView, registerSessionPeopleEnglish.catalog.sessionsView);
     }
   }
+  const sessionDetails: TranslationMap = {};
+  for (const [key, value] of Object.entries(
+    registerChatSessionEnglish.catalog.chat.sessionDetails,
+  )) {
+    sessionDetails[key] = value;
+    if (key === "close") {
+      Object.assign(sessionDetails, registerChatDetailsEnglish.catalog.chat.sessionDetails);
+    }
+  }
   const toolCards: TranslationMap = {};
   const toolContent = registerChatToolContentEnglish.catalog.chat.toolCards;
-  for (const [key, value] of Object.entries(en.chat.toolCards)) {
+  for (const [key, value] of Object.entries(registerChatToolLabelsEnglish.catalog.chat.toolCards)) {
     toolCards[key] = value;
     const contentKeys: Array<keyof typeof toolContent> =
       key === "toolOutput"
@@ -240,6 +261,7 @@ export function loadControlUiSourceCatalog(): TranslationMap {
       ...en,
       aboutPage: registerAboutEnglish.catalog.aboutPage,
       dashboardsPage: registerDashboardsEnglish.catalog.dashboardsPage,
+      worktrees: registerSessionOrganizationEnglish.catalog.worktrees,
       configForm: registerSettingsEnglish.catalog.configForm,
       configView: registerSettingsEnglish.catalog.configView,
       quickSettings: registerPreferencesEnglish.catalog.quickSettings,
@@ -256,10 +278,22 @@ export function loadControlUiSourceCatalog(): TranslationMap {
       chat: {
         ...en.chat,
         ...registerChatSessionEnglish.catalog.chat,
+        ...registerSessionNavigationEnglish.catalog.chat,
+        sessionDetails,
+        sessionSuggestions: {
+          ...registerSessionNavigationEnglish.catalog.chat.sessionSuggestions,
+          ...registerChatSessionEnglish.catalog.chat.sessionSuggestions,
+        },
         commands: registerCommandPaletteEnglish.catalog.chat.commands,
         welcome: registerCommandPaletteEnglish.catalog.chat.welcome,
         messages: registerChatMessageMetadataEnglish.catalog.chat.messages,
         toolCards,
+        systemNotice: registerChatMessageMetadataEnglish.catalog.chat.systemNotice,
+        questions: registerChatQuestionsEnglish.catalog.chat.questions,
+        imageLightbox: registerChatMediaEnglish.catalog.chat.imageLightbox,
+        mediaPlayer: registerChatMediaEnglish.catalog.chat.mediaPlayer,
+        attachments: registerChatComposerEnglish.catalog.chat.attachments,
+        privateDraftReload: registerChatComposerEnglish.catalog.chat.privateDraftReload,
         pullRequests: registerGitHubEnglish.catalog.chat.pullRequests,
       },
       sessionHovercard: registerGitHubEnglish.catalog.sessionHovercard,
@@ -301,6 +335,7 @@ export function loadControlUiSourceCatalog(): TranslationMap {
     registerChatGoalsEnglish.catalog,
     registerChatProviderReviewEnglish.catalog,
     registerCodeBlocksEnglish.catalog,
+    registerConnectionRecoveryEnglish.catalog,
     registerCronEnglish.catalog,
     registerDevicesEnglish.catalog,
     registerDreamingEnglish.catalog,
