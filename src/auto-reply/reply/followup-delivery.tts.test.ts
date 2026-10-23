@@ -26,10 +26,11 @@ import { createMockReplyOperation } from "./test-helpers.js";
 
 const outbound = vi.hoisted(() => vi.fn());
 
-// mock-isolation: capture transport I/O without contacting a channel or loading model plans.
+// mock-isolation: resolve synthetic routes without loading model or authentication plans.
 vi.mock("../../agents/runtime-plan/build.js", () => ({
   buildAgentRuntimeDeliveryPlan: () => ({ resolveFollowupRoute: () => undefined }),
 }));
+// mock-isolation: capture outbound payloads without loading delivery queues or contacting channels.
 vi.mock("../../infra/outbound/deliver.js", () => ({
   deliverOutboundPayloadsInternal: (...args: unknown[]) => outbound(...args),
 }));
