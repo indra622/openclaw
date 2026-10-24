@@ -12,6 +12,9 @@ import {
 } from "openclaw/plugin-sdk/sqlite-runtime-testing";
 import { withOpenClawTestState } from "openclaw/plugin-sdk/test-state";
 import { afterAll, describe, expect, it, vi } from "vitest";
+import { createOAuthRefreshCredential } from "../../src/agents/auth-profiles/credential-fixtures.test-support.js";
+import { buildAgentHarnessSupportContext } from "../../src/agents/harness/support.js";
+import { createModelAuthAvailabilityResolver } from "../../src/agents/model-auth-availability.js";
 
 const runHostPreparedIsolatedCompletion = vi.hoisted(() => vi.fn());
 const runCodexIsolatedCompletion = vi.hoisted(() => vi.fn());
@@ -281,6 +284,80 @@ describe("Codex agent harness supports()", () => {
     if (!supported) {
       expect(!result.supported ? result.reason : undefined).toContain("prepared");
     }
+  });
+
+  it("offers Codex for a provider-selected sharing grant on public Responses", () => {
+    const cfg = { auth: { order: { openai: ["openai:shared"] } } };
+    const auth = createModelAuthAvailabilityResolver({
+      cfg,
+      env: {},
+      authStore: {
+        version: 1,
+        profiles: {
+          "openai:shared": createOAuthRefreshCredential({ authFlow: "chatgpt-token-sharing" }),
+        },
+      },
+    }).evaluateRuntimeModelAuth("openai", {
+      modelId: "gpt-5.4",
+      runtimeId: "codex",
+      api: "openai-responses",
+      baseUrl: "https://api.openai.com/v1",
+    });
+    expect(auth).toMatchObject({
+      availability: true,
+      selectedCredential: { source: "profile", mode: "oauth", requirement: "api-key" },
+    });
+    expect(
+      supportHarness.supports(
+        buildAgentHarnessSupportContext({
+          config: cfg,
+          provider: "openai",
+          modelId: "gpt-5.4",
+          requestedRuntime: "codex",
+          modelProvider: {
+            ...auth.selectedRoute,
+            preparedAuth: auth.selectedCredential,
+          },
+        }),
+      ),
+    ).toMatchObject({ supported: true });
+  });
+
+  it.each<{
+    name: string;
+    provider?: string;
+    auth?: Partial<
+      NonNullable<NonNullable<AgentHarnessSupportContext["modelProvider"]>["preparedAuth"]>
+    >;
+    route?: Partial<NonNullable<AgentHarnessSupportContext["modelProvider"]>>;
+  }>([
+    { name: "missing sharing consent", auth: { authFlow: undefined } },
+    { name: "identity-only consent", auth: { authFlow: "chatgpt-identity" } },
+    { name: "native OAuth", auth: { authFlow: "external-cli" } },
+    { name: "unowned direct OAuth", auth: { source: "direct" } },
+    { name: "native-owned OAuth", auth: { source: "harness" } },
+    { name: "foreign provider", provider: "anthropic" },
+    { name: "custom endpoint", route: { baseUrl: "https://relay.example.test/v1" } },
+    { name: "native backend adapter", route: { api: "openai-chatgpt-responses" } },
+  ])("rejects public Responses sharing with $name", ({ provider = "openai", auth, route }) => {
+    expect(
+      supports({
+        provider,
+        modelProvider: {
+          api: "openai-responses",
+          baseUrl: "https://api.openai.com/v1",
+          runtimePolicy: { compatibleIds: ["openclaw", "codex"] },
+          preparedAuth: {
+            source: "profile",
+            mode: "oauth",
+            authFlow: "chatgpt-token-sharing",
+            requirement: "api-key",
+            ...auth,
+          },
+          ...route,
+        },
+      }).supported,
+    ).toBe(false);
   });
 
   it("rejects a prepared route that does not declare Codex compatibility", () => {
