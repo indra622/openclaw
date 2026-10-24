@@ -40,7 +40,6 @@ import {
   getWorkerAuthProfileWrites,
   isEnvOnlyAuthProfileRuntime,
   resolveRuntimeAuthProfileAgentDir,
-  resolveRuntimeAuthProfileLoadOptions,
 } from "./runtime-scope.js";
 import { createEmptyAuthProfileStore } from "./runtime-snapshot-owner.js";
 import { resolveSharedMainAuthAgentDir } from "./shared-main-dir.js";
@@ -64,6 +63,13 @@ export type {
   LoadAuthProfileStoreOptions,
   PreparedAuthProfileStoreReads,
 } from "./runtime-read.types.js";
+
+export function resolveRuntimeAuthProfileLoadOptions(
+  options?: LoadAuthProfileStoreOptions,
+): LoadAuthProfileStoreOptions | undefined {
+  const inheritedAuthDir = resolveRuntimeAuthProfileAgentDir();
+  return inheritedAuthDir === undefined ? options : { ...options, inheritedAuthDir };
+}
 
 export function resolveExternalCliOverlayOptions(
   options: LoadAuthProfileStoreOptions | undefined,

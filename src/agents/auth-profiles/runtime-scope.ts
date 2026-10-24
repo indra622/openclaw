@@ -7,7 +7,6 @@ import { resolveDatabasePathKey } from "../../infra/sqlite-worker-identity.js";
 import type { AsyncWorkScope } from "../../shared/async-work-scope.js";
 import { resolveGlobalSingleton } from "../../shared/global-singleton.js";
 import { resolveOpenClawStateSqlitePath } from "../../state/openclaw-state-db.paths.js";
-import type { LoadAuthProfileStoreOptions } from "./runtime-read.types.js";
 import type { AuthProfileStore } from "./types.js";
 
 type AuthProfileRuntimeMode =
@@ -15,16 +14,6 @@ type AuthProfileRuntimeMode =
   | { kind: "agent-dir"; agentDir: string; sharedStore?: AuthProfileStore; env: NodeJS.ProcessEnv };
 
 export const authProfileRuntimeMode = new AsyncLocalStorage<AuthProfileRuntimeMode>();
-
-export function resolveRuntimeAuthProfileLoadOptions(
-  options?: LoadAuthProfileStoreOptions,
-): LoadAuthProfileStoreOptions | undefined {
-  const mode = authProfileRuntimeMode.getStore();
-  if (mode?.kind !== "agent-dir") {
-    return options;
-  }
-  return { ...options, inheritedAuthDir: mode.agentDir };
-}
 
 export function getScopedAuthProfileEnv(): NodeJS.ProcessEnv | undefined {
   const mode = authProfileRuntimeMode.getStore();
