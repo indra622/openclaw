@@ -1,5 +1,6 @@
 import { createNativeSessionBindingScope } from "openclaw/plugin-sdk/agent-harness-session-runtime";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { startProxy } from "../../../../src/infra/net/proxy/proxy-lifecycle.js";
 import {
   CodexInferenceAuthorizationError,
   createCodexInferenceModelBinding,
@@ -603,6 +604,10 @@ it.each([
   { env: { HTTPS_PROXY: proxyUrl }, supported: true },
   { env: { HTTPS_PROXY: " " + proxyUrl + " " }, supported: false },
   { env: { HTTPS_PROXY: proxyUrl, REQUEST_METHOD: "GET" }, supported: false },
+  { env: { ...bothProxies, NO_PROXY: "127.0.0.1,example.com" }, supported: false },
+  { env: { ...bothProxies, NO_PROXY: "127.0.0.1,10.0.0.0/8" }, supported: false },
+  { env: { ...bothProxies, NO_PROXY: "127.0.0.1,127.0.0.0/16" }, supported: false },
+  { env: { ...bothProxies, NO_PROXY: "127.0.0.1,*.localhost" }, supported: false },
 ])("qualifies native/relay proxies (%j)", async ({ env, supported }) => {
   for (const [key, value] of Object.entries(env)) {
     vi.stubEnv(key, value);
@@ -614,6 +619,40 @@ it.each([
     expect(h.writes).toEqual([]);
   }
 });
+
+it.each(["gateway-only", "proxy", "block"] as const)(
+  "prepares subscription sharing only with compatible managed %s routing",
+  async (loopbackMode) => {
+    const proxy = await startProxy({
+      proxyUrl: "https://proxy.example.invalid:8443",
+      loopbackMode,
+    });
+    try {
+      const h = harness();
+      const ownSubscription = () =>
+        ownClient(
+          h.client,
+          {},
+          {
+            resolve: async () => ({ token: "synthetic-subscription-token", assertCurrent() {} }),
+          },
+        );
+      if (loopbackMode !== "gateway-only") {
+        expect(ownSubscription).toThrow("compatible proxy and trust configuration");
+        expect(h.writes).toEqual([]);
+        return;
+      }
+      ownSubscription();
+      const route = await prepare(h, "apiKey", snapshot(), true);
+      expect(route.upstream).toBe(openaiUrl);
+      expect(new URL(route.baseUrl).hostname).toBe("127.0.0.1");
+      h.client.close();
+      expect(() => route.assertCurrent()).toThrow();
+    } finally {
+      await proxy?.stop();
+    }
+  },
+);
 
 it("does not guess an endpoint without native account evidence", async () => {
   const h = owned(accountHarness("unknown"));
