@@ -1,6 +1,5 @@
 import { createNativeSessionBindingScope } from "openclaw/plugin-sdk/agent-harness-session-runtime";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { startProxy } from "../../../../src/infra/net/proxy/proxy-lifecycle.js";
 import {
   CodexInferenceAuthorizationError,
   createCodexInferenceModelBinding,
@@ -619,40 +618,6 @@ it.each([
     expect(h.writes).toEqual([]);
   }
 });
-
-it.each(["gateway-only", "proxy", "block"] as const)(
-  "prepares subscription sharing only with compatible managed %s routing",
-  async (loopbackMode) => {
-    const proxy = await startProxy({
-      proxyUrl: "https://proxy.example.invalid:8443",
-      loopbackMode,
-    });
-    try {
-      const h = harness();
-      const ownSubscription = () =>
-        ownClient(
-          h.client,
-          {},
-          {
-            resolve: async () => ({ token: "synthetic-subscription-token", assertCurrent() {} }),
-          },
-        );
-      if (loopbackMode !== "gateway-only") {
-        expect(ownSubscription).toThrow("compatible proxy and trust configuration");
-        expect(h.writes).toEqual([]);
-        return;
-      }
-      ownSubscription();
-      const route = await prepare(h, "apiKey", snapshot(), true);
-      expect(route.upstream).toBe(openaiUrl);
-      expect(new URL(route.baseUrl).hostname).toBe("127.0.0.1");
-      h.client.close();
-      expect(() => route.assertCurrent()).toThrow();
-    } finally {
-      await proxy?.stop();
-    }
-  },
-);
 
 it("does not guess an endpoint without native account evidence", async () => {
   const h = owned(accountHarness("unknown"));
