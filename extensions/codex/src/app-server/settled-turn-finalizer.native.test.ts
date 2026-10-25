@@ -302,6 +302,7 @@ type SummaryScenario = {
   unfinishedPrior?: "ordinary" | "oversized";
   hidden?: boolean;
   promptSuppressed?: boolean;
+  continuation?: boolean;
   live?: boolean;
 };
 
@@ -645,6 +646,7 @@ it.skipIf(process.platform === "win32").for<SummaryScenario>([
   { label: "unfinished oversized prior turn", unfinishedPrior: "oversized" },
   { label: "hidden background notification", hidden: true },
   { label: "prompt-less stranded-reply retry", promptSuppressed: true },
+  { label: "same-run continuation after a transient provider overload", continuation: true },
   ...(LIVE
     ? [
         { label: "hidden background notification with live provider", hidden: true, live: true },
@@ -678,6 +680,7 @@ async function runSummary(
     live = false,
     hidden = false,
     promptSuppressed = false,
+    continuation = false,
   }: SummaryScenario,
 ) {
   const pluginConfig = {
@@ -764,7 +767,7 @@ async function runSummary(
   }
   fixture.setPhase("action");
   params.runId = "run-settled-action";
-  if (hidden || promptSuppressed) {
+  if (hidden || promptSuppressed || continuation) {
     params.prompt =
       "Background task completed. Use exec_command exactly once to run " +
       "`printf 'completed-once\\n' >> completed-actions.txt; cat completed-actions.txt`, " +
@@ -775,23 +778,46 @@ async function runSummary(
     // (src/auto-reply/reply/stranded-reply-recovery.ts), so the turn mirrors no prompt row.
     params.suppressNextUserMessagePersistence = true;
   }
-  if (hidden) {
+  if (hidden || continuation) {
     const createRecorder = await loadUserTurnTranscriptRecorderFactoryForTest();
     params.userTurnTranscriptRecorder = createRecorder({
       input: {
         text: params.prompt,
-        display: false,
-        provenance: {
-          kind: "inter_session",
-          sourceChannel: "internal",
-          sourceTool: "agent_harness_task",
-        },
-        idempotencyKey: "announce:completed-action:user",
+        ...(hidden
+          ? {
+              display: false,
+              provenance: {
+                kind: "inter_session" as const,
+                sourceChannel: "internal",
+                sourceTool: "agent_harness_task",
+              },
+            }
+          : {}),
+        idempotencyKey: hidden ? "announce:completed-action:user" : `${params.runId}:user`,
       },
       target: { ...transcriptTarget(params), sessionEntry: undefined },
       beforeMessageWrite: ({ message }) => message,
     });
     await params.userTurnTranscriptRecorder.persistApproved();
+  }
+  if (continuation) {
+    // Same-run retries keep the recorder while suppressing the new native turn's prompt.
+    fixture.setPhase("overload");
+    const closeFirstHost = await bindProductionHarnessHostCapabilitiesForTest(params);
+    cleanups.push(async () => closeFirstHost());
+    const overloaded = await run();
+    closeFirstHost();
+    expect(overloaded.terminal).toMatchObject({
+      kind: "failed",
+      error: { status: 503, code: "OVERLOADED" },
+    });
+    expect(overloaded.replayMetadata).toEqual({ hadPotentialSideEffects: false, replaySafe: true });
+    expect(fixture.requests).toHaveLength(1);
+    expect(params.userTurnTranscriptRecorder?.getPersistedMessage?.()).toMatchObject({
+      __openclaw: { mirrorIdentity: expect.stringMatching(/:prompt$/) },
+    });
+    fixture.setPhase("action");
+    params.suppressNextUserMessagePersistence = true;
   }
   const closeHost = await bindProductionHarnessHostCapabilitiesForTest(params);
   cleanups.push(async () => closeHost());
@@ -809,7 +835,7 @@ async function runSummary(
       expect.objectContaining({ call_id: "unfinished-prior-call" }),
     );
   }
-  if (hidden) {
+  if (hidden || continuation) {
     expect(context.data).toEqual(
       containsObject(
         {
@@ -821,7 +847,7 @@ async function runSummary(
       ),
     );
     expect(params.userTurnTranscriptRecorder?.getPersistedMessage?.()).toMatchObject({
-      display: false,
+      ...(hidden ? { display: false } : {}),
       __openclaw: { mirrorIdentity: expect.any(String) },
     });
   }
