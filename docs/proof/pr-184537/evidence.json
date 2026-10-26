@@ -1,0 +1,24 @@
+{
+  "pr": 184537,
+  "head": "a09f3aec3c1035d3fa8d115b57898b7923090c2a",
+  "build": "Official package-mac-app.sh; debug; arm64; ad-hoc signed; unrelated local MLX voice helper omitted",
+  "ui_sequence": [
+    "Web: native Mac browser tab and page show Article before switch",
+    "Settings > This Mac: enable Native experience",
+    "Native app window visible; ordinary page updates its own document.title while hidden",
+    "Settings > This Mac: disable Native experience; return to app",
+    "Web: retained Mac tab and page show Updated while native"
+  ],
+  "page_ack": {
+    "title": "Updated while native",
+    "revision": 1,
+    "visibility": "hidden",
+    "utc": "2026-10-26T12:49:51.276133+00:00"
+  },
+  "scope": "Actual PR-head application UI; not a test harness, mock UI, released/notarized binary, or before-fix app comparison",
+  "screenshots": {
+    "01-web-before.png": "5b259cee372f6c239a4523f4829c5830fdee34bee887be4523427587230a7522",
+    "02-native-window.png": "6daf5d6e5c41121121672ae87df4805fcec00ad8c58e8fb40265d2ab4f0ce9a4",
+    "03-web-after.png": "f297b99d7b2f143002ec71189c0817d50ae5491dbfe200cdafffc6f48b594a7c"
+  }
+}
