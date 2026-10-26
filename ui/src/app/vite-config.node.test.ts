@@ -17,8 +17,10 @@ import {
   readControlUiSourceCatalog,
 } from "../../../scripts/lib/control-ui-i18n-catalog.ts";
 import { flattenTranslations } from "../../../scripts/lib/control-ui-i18n-sync-plan.ts";
+import { selectControlUiRoutePreloads } from "../../../src/gateway/control-ui-route-preloads.ts";
 import { createDeferred as deferred } from "../../../test/helpers/promise.js";
 import { controlUiLocaleModulesPlugin } from "../../config/control-ui-locales.ts";
+import { extractControlUiStartupAssetPaths } from "../../config/control-ui-startup-assets.ts";
 import controlUiViteConfig, {
   createControlUiPrecompressedAssetVariants,
   resolveControlUiBuildInfo,
@@ -150,6 +152,19 @@ function dataModuleUrl(source: string): string {
   return `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
 }
 
+async function expectEncodings(
+  file: string,
+  source: string | Buffer,
+  encodings: string[] = [],
+  startup?: Set<string>,
+) {
+  const variants = await createControlUiPrecompressedAssetVariants(file, source, startup);
+  expect(variants.map(({ fileName }) => fileName)).toEqual(
+    encodings.map((ext) => `${file}.${ext}`),
+  );
+  return variants;
+}
+
 async function executeLocale(
   load: Awaited<ReturnType<typeof localeHooks>>["load"],
   baseSource: string,
@@ -220,9 +235,46 @@ it("emits Brotli and gzip variants only for bundled compressible assets", async 
     Buffer.from(source),
   );
   expect(repeated).toEqual(variants);
-  expect(await createControlUiPrecompressedAssetVariants("index.html", source)).toEqual([]);
-  expect(await createControlUiPrecompressedAssetVariants("assets/logo.png", source)).toEqual([]);
-  expect(await createControlUiPrecompressedAssetVariants("assets/app.js.map", source)).toEqual([]);
+  for (const excluded of ["index.html", "assets/logo.png", "assets/app.js.map"]) {
+    await expectEncodings(excluded, source);
+  }
+});
+
+it("precompresses assets starting at 4 KiB only when the encoding saves bytes", async () => {
+  await expectEncodings("assets/small.js", "x".repeat(4095));
+  const boundary = "é".repeat(2048);
+  const variants = await expectEncodings("assets/boundary.js", boundary, ["br", "gz"]);
+  for (const variant of variants) {
+    expect(variant.source.byteLength).toBeLessThan(Buffer.byteLength(boundary));
+  }
+  const incompressible = Buffer.concat(
+    Array.from({ length: 128 }, (_, index) => createHash("sha256").update(String(index)).digest()),
+  );
+  await expectEncodings("assets/random.wasm", incompressible);
+  // These tails produce an exactly 4096-byte Brotli or gzip output, respectively.
+  incompressible.fill(0, 4096 - 29);
+  await expectEncodings("assets/equal-br.wasm", incompressible);
+  incompressible.fill(0, 4096 - 66);
+  await expectEncodings("assets/equal-gzip.wasm", incompressible, ["br"]);
+});
+
+it("keeps small CSS and measured startup assets compressed, excluding deferred route preloads", async () => {
+  const html = `
+    <script type="module" src="./assets/entry.js"></script>
+    <link rel="modulepreload" href="/control/assets/runtime.js">
+    <template data-openclaw-route-preloads="chat">
+      <link rel="modulepreload" href="./assets/chat.js">
+    </template>`;
+  const startupAssets = new Set(
+    extractControlUiStartupAssetPaths(selectControlUiRoutePreloads(html, null)),
+  );
+  const source = "export const value = 123;\n".repeat(20);
+  for (const fileName of ["assets/entry.js", "assets/runtime.js", "assets/lazy.css"]) {
+    await expectEncodings(fileName, source, ["br", "gz"], startupAssets);
+  }
+  await expectEncodings("assets/chat.js", source, [], startupAssets);
+  await expectEncodings("assets/tiny.css", "x", [], startupAssets);
+  await expectEncodings("assets/entry.js", "x", [], startupAssets);
 });
 
 it("uses the supplied artifact identity without reading Git metadata", () => {
