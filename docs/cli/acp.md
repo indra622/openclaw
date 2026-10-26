@@ -46,6 +46,8 @@ Visible assistant text appears as append-only `agent_message_chunk` updates, inc
 
 Gateway failure explanations appear as `[OpenClaw interruption]` message updates before the prompt settles and are included in session replay. A partial answer that reaches the model output token limit returns the ACP stop reason `max_tokens`; user cancellation returns `cancelled`.
 
+Session replay preserves message boundaries with `messageId`: transcript chunks share their stored message identity, and ledger prompt chunks share a prompt identity. This also applies to existing sessions, so retrying the same prompt after a failure does not merge the two user messages on reload.
+
 ## Known limitations
 
 - ACP v1 cannot retract or replace text already displayed. Repeated snapshots of the same item append only a suffix that extends the displayed text; incompatible rewrites are ignored rather than replayed as duplicated narration.
