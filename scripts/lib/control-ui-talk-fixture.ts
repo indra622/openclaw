@@ -80,8 +80,33 @@ export async function launchTalkObservationBrowser(artifactDir: string, headed: 
     throw error;
   }
 }
-export type TalkBenchState = "listening" | "speaking" | "transcribing" | "idle" | "hidden";
-export type TalkBenchProof = {
+export type TalkBenchState =
+  | "listening"
+  | "speaking"
+  | "responding"
+  | "transcribing"
+  | "idle"
+  | "hidden"
+  | "hidden-transcribing";
+type TalkRevealProof = {
+  visibilityAtMs: number;
+  transcriptDomAtMs?: number;
+  secondFrameAtMs?: number;
+  visibilityToDomMs?: number;
+  visibilityToFrameMs?: number;
+  domToFrameMs?: number;
+  observedChunks?: number;
+};
+type TalkNativeAudioState = {
+  contextStates: AudioContextState[];
+  contextCount: number;
+  liveContextCount: number;
+  audioElementCount: number;
+  pausedAudioElementCount: number;
+  allLiveContextsSuspended: boolean;
+  allAudioPaused: boolean;
+};
+type TalkBenchProof = {
   peer?: { channel: EventTarget; remoteDescription: RTCSessionDescriptionInit | null };
   analyserReads: number;
   meterStyleMutations: number;
@@ -89,12 +114,40 @@ export type TalkBenchProof = {
   intervalCallbacks: number;
   timeoutCallbacks: number;
   animationCallbacks: number;
+  mutationObserverCallbacks: number;
+  resizeObserverCallbacks: number;
+  intersectionObserverCallbacks: number;
   transcriptChunks: number;
+  transcriptDomMutations: number;
+  readonly transcriptPendingChunks: number;
+  tooltipOpenAtStart: boolean;
+  readonly tooltipOpenAtEnd: boolean;
+  tooltipChanges: number;
+  focusedStop?: {
+    documentFocusedAtStart: boolean;
+    documentFocusedAtEnd: boolean;
+    triggerFocusedAtStart: boolean;
+    triggerFocusedAtEnd: boolean;
+    tooltipOpenAtStart: boolean;
+    tooltipOpenAtEnd: boolean;
+    invalidated: boolean;
+  };
   transcriptLatenciesMs: number[];
   playbackStartLatenciesMs: number[];
   frameTimes: number[];
-  setState: (state: TalkBenchState) => void;
-  start: (frames: boolean) => void;
+  reveal?: TalkRevealProof;
+  armReveal: () => void;
+  readNativeAudioState: () => TalkNativeAudioState;
+  suspendNativeAudio: () => Promise<TalkNativeAudioState>;
+  setState: (state: TalkBenchState, externalTranscripts?: boolean) => void;
+  deliverTranscriptChunk: (expectedHidden?: boolean) => string;
+  readTranscriptDom: () => void;
+  start: (
+    frames: boolean,
+    observeTranscripts?: boolean,
+    observeTooltips?: boolean,
+    focusedStop?: boolean,
+  ) => void;
   stop: () => void;
 };
 
@@ -105,15 +158,35 @@ declare global {
   }
 }
 /** Real Web Audio signal; provider data-channel messages use the existing E2E contract. */
-export async function installTalkPerfFixture(page: Page, includeCounters: boolean) {
+export async function installTalkPerfFixture(
+  page: Page,
+  includeCounters: boolean,
+  suspendNativeAudio: boolean,
+) {
   await page.addInitScript(
-    ({ counters }) => {
+    ({ counters, suspendAudio }) => {
+      const NativeMutationObserver = window.MutationObserver;
+      const nativeRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+      const nativeCancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+      const nativeAudioContexts: AudioContext[] = [];
+      if (suspendAudio) {
+        // Counterfactual only: retain the native graph, connections, and JS meter timer.
+        window.AudioContext = new Proxy(window.AudioContext, {
+          construct(target, args, newTarget) {
+            const created: AudioContext = Reflect.construct(target, args, newTarget);
+            nativeAudioContexts.push(created);
+            return created;
+          },
+        });
+      }
       let context: AudioContext | undefined;
       let gain: GainNode | undefined;
       let modulationDepth: GainNode | undefined;
       let stream: MediaStream | undefined;
       let sequence = 0;
       let turn = 0;
+      let respondingId: string | undefined;
+      let previousTranscriptId: string | null = null;
       let activeTranscript:
         | {
             id: string;
@@ -123,8 +196,43 @@ export async function installTalkPerfFixture(page: Page, includeCounters: boolea
       let timer: ReturnType<typeof setTimeout> | undefined;
       let frame: number | undefined;
       let observer: MutationObserver | undefined;
+      let tooltipObserver: MutationObserver | undefined;
+      let finishFocusedStop: (() => void) | undefined;
+      let revealObserver: MutationObserver | undefined;
+      let revealFrame: number | undefined;
+      let revealVisibilityListener: ((event: Event) => void) | undefined;
       let observing = false;
       const pending = new Map<string, number>();
+      const clearRevealObservation = () => {
+        revealObserver?.disconnect();
+        revealObserver = undefined;
+        if (revealFrame !== undefined) {
+          nativeCancelAnimationFrame(revealFrame);
+          revealFrame = undefined;
+        }
+        if (revealVisibilityListener) {
+          document.removeEventListener("visibilitychange", revealVisibilityListener);
+          revealVisibilityListener = undefined;
+        }
+      };
+      const send = (event: unknown) => {
+        if (!proof.peer) {
+          throw new Error("Synthetic Talk peer was not created");
+        }
+        proof.peer.channel.dispatchEvent(
+          new MessageEvent("message", { data: JSON.stringify(event) }),
+        );
+      };
+      const finishResponding = () => {
+        if (respondingId === undefined) {
+          return;
+        }
+        send({
+          type: "response.done",
+          response: { id: respondingId, status: "completed", output: [] },
+        });
+        respondingId = undefined;
+      };
       const proof: TalkBenchProof = {
         analyserReads: 0,
         meterStyleMutations: 0,
@@ -132,11 +240,108 @@ export async function installTalkPerfFixture(page: Page, includeCounters: boolea
         intervalCallbacks: 0,
         timeoutCallbacks: 0,
         animationCallbacks: 0,
+        mutationObserverCallbacks: 0,
+        resizeObserverCallbacks: 0,
+        intersectionObserverCallbacks: 0,
         transcriptChunks: 0,
+        transcriptDomMutations: 0,
+        get transcriptPendingChunks() {
+          return pending.size;
+        },
+        tooltipOpenAtStart: false,
+        get tooltipOpenAtEnd() {
+          return document.querySelector("openclaw-tooltip[open]") !== null;
+        },
+        tooltipChanges: 0,
         transcriptLatenciesMs: [],
         playbackStartLatenciesMs: [],
         frameTimes: [],
-        setState(state) {
+        readNativeAudioState() {
+          const contextStates = nativeAudioContexts.map((audioContext) => audioContext.state);
+          const liveStates = contextStates.filter((state) => state !== "closed");
+          const audioElements = [...document.querySelectorAll("audio")];
+          const pausedAudioElementCount = audioElements.filter((audio) => audio.paused).length;
+          return {
+            contextStates,
+            contextCount: contextStates.length,
+            liveContextCount: liveStates.length,
+            audioElementCount: audioElements.length,
+            pausedAudioElementCount,
+            allLiveContextsSuspended:
+              liveStates.length > 0 && liveStates.every((state) => state === "suspended"),
+            allAudioPaused:
+              audioElements.length > 0 && pausedAudioElementCount === audioElements.length,
+          };
+        },
+        async suspendNativeAudio() {
+          if (!suspendAudio) {
+            throw new Error("Native audio suspension requires the comparison's suspended side");
+          }
+          for (const audio of document.querySelectorAll("audio")) {
+            audio.pause();
+          }
+          await Promise.all(
+            nativeAudioContexts
+              .filter((audioContext) => audioContext.state === "running")
+              .map((audioContext) => audioContext.suspend()),
+          );
+          const state = proof.readNativeAudioState();
+          if (!state.allLiveContextsSuspended || !state.allAudioPaused) {
+            throw new Error(`Native audio suspension was incomplete: ${JSON.stringify(state)}`);
+          }
+          return state;
+        },
+        armReveal() {
+          clearRevealObservation();
+          proof.reveal = undefined;
+          if (!document.hidden) {
+            throw new Error("Reveal observation must be armed while hidden");
+          }
+          const onVisibility = (event: Event) => {
+            if (document.hidden) {
+              return;
+            }
+            document.removeEventListener("visibilitychange", onVisibility);
+            revealVisibilityListener = undefined;
+            const reveal: TalkRevealProof = { visibilityAtMs: event.timeStamp };
+            proof.reveal = reveal;
+            const observeDom = () => {
+              if (reveal.transcriptDomAtMs !== undefined) {
+                return;
+              }
+              proof.readTranscriptDom();
+              if (pending.size) {
+                return;
+              }
+              const domAtMs = performance.now();
+              reveal.transcriptDomAtMs = domAtMs;
+              reveal.visibilityToDomMs = domAtMs - reveal.visibilityAtMs;
+              reveal.observedChunks = proof.transcriptChunks;
+              revealObserver?.disconnect();
+              revealObserver = undefined;
+              revealFrame = nativeRequestAnimationFrame(() => {
+                revealFrame = nativeRequestAnimationFrame(() => {
+                  const frameAtMs = performance.now();
+                  reveal.secondFrameAtMs = frameAtMs;
+                  reveal.visibilityToFrameMs = frameAtMs - reveal.visibilityAtMs;
+                  reveal.domToFrameMs = frameAtMs - domAtMs;
+                  clearRevealObservation();
+                });
+              });
+            };
+            revealObserver = new NativeMutationObserver(observeDom);
+            revealObserver.observe(document.body, {
+              subtree: true,
+              childList: true,
+              characterData: true,
+            });
+            observeDom();
+          };
+          revealVisibilityListener = onVisibility;
+          document.addEventListener("visibilitychange", onVisibility);
+        },
+        setState(state, externalTranscripts = false) {
+          clearRevealObservation();
           if (timer !== undefined) {
             clearTimeout(timer);
           }
@@ -148,96 +353,173 @@ export async function installTalkPerfFixture(page: Page, includeCounters: boolea
           if (modulationDepth) {
             modulationDepth.gain.value = state === "speaking" ? 0.1 : 0;
           }
-          const send = (event: unknown) => {
-            if (!proof.peer) {
-              throw new Error("Synthetic Talk peer was not created");
-            }
-            proof.peer.channel.dispatchEvent(
-              new MessageEvent("message", { data: JSON.stringify(event) }),
-            );
-          };
           if (activeTranscript) {
             send({
               type: "response.output_audio_transcript.done",
               item_id: activeTranscript.id,
               transcript: activeTranscript.text,
             });
+            previousTranscriptId = activeTranscript.id;
             activeTranscript = undefined;
           }
+          finishResponding();
           send({ type: "input_audio_buffer.speech_started" });
-          if (state === "transcribing") {
+          if (state === "responding") {
+            respondingId = `bench-audio-response-${++turn}`;
+            send({ type: "response.created", response: { id: respondingId } });
+          } else if (state === "transcribing" || state === "hidden-transcribing") {
             const id = `bench-response-${++turn}`;
             activeTranscript = { id, text: "" };
             send({
               type: "conversation.item.added",
-              previous_item_id: null,
+              previous_item_id: previousTranscriptId,
               item: { id, type: "message", role: "assistant", content: [] },
             });
             const tick = () => {
-              const token = `voice${String(++sequence).padStart(6, "0")}.`;
-              if (observing) {
-                pending.set(token, performance.now());
-                proof.transcriptChunks++;
-              }
-              activeTranscript!.text += `${token} `;
-              send({
-                type: "response.output_audio_transcript.delta",
-                item_id: id,
-                delta: `${token} `,
-              });
+              proof.deliverTranscriptChunk();
               timer = setTimeout(tick, 50);
             };
-            tick();
+            if (!externalTranscripts && state === "transcribing") {
+              tick();
+            }
           }
         },
-        start(frames) {
+        deliverTranscriptChunk(expectedHidden) {
+          if (!activeTranscript) {
+            throw new Error("No synthetic transcript is active");
+          }
+          if (expectedHidden !== undefined && document.hidden !== expectedHidden) {
+            throw new Error("Document visibility changed during external transcript delivery");
+          }
+          const token = `voice${String(++sequence).padStart(6, "0")}.`;
+          if (observing) {
+            pending.set(token, performance.now());
+            proof.transcriptChunks++;
+          }
+          activeTranscript.text += `${token} `;
+          send({
+            type: "response.output_audio_transcript.delta",
+            item_id: activeTranscript.id,
+            delta: `${token} `,
+          });
+          return token;
+        },
+        readTranscriptDom() {
+          if (!pending.size) {
+            return;
+          }
+          const text = [...document.querySelectorAll(".agent-chat__voice-turn-text")]
+            .map((element) => element.textContent)
+            .join(" ");
+          for (const [token, sentAt] of pending) {
+            if (text.includes(token)) {
+              proof.transcriptLatenciesMs.push(performance.now() - sentAt);
+              pending.delete(token);
+            }
+          }
+        },
+        start(frames, observeTranscripts = false, observeTooltips = false, focusedStop = false) {
           observing = true;
+          pending.clear();
           proof.analyserReads =
             proof.intervalCallbacks =
             proof.timeoutCallbacks =
             proof.animationCallbacks =
+            proof.mutationObserverCallbacks =
+            proof.resizeObserverCallbacks =
+            proof.intersectionObserverCallbacks =
               0;
           proof.transcriptChunks = 0;
+          proof.transcriptDomMutations = 0;
           proof.meterStyleMutations = proof.meterDataMutations = 0;
           proof.transcriptLatenciesMs = [];
           proof.frameTimes = [];
-          observer = new MutationObserver((records) => {
-            if (counters) {
-              for (const record of records) {
-                if (
-                  record.type !== "attributes" ||
-                  !(record.target instanceof Element) ||
-                  !record.target.closest("openclaw-microphone-activity")
-                ) {
-                  continue;
-                }
-                if (record.attributeName === "style") {
-                  proof.meterStyleMutations++;
-                } else if (record.attributeName?.startsWith("data-")) {
-                  proof.meterDataMutations++;
+          proof.tooltipChanges = 0;
+          proof.tooltipOpenAtStart = observeTooltips && proof.tooltipOpenAtEnd;
+          proof.focusedStop = undefined;
+          const trigger = focusedStop ? document.activeElement : null;
+          const tooltip = trigger?.closest("openclaw-tooltip");
+          if (focusedStop) {
+            if (
+              !(trigger instanceof HTMLButtonElement) ||
+              trigger.getAttribute("aria-label") !== "Stop voice input" ||
+              !tooltip
+            ) {
+              throw new Error("Native keyboard focus did not reach the Stop trigger");
+            }
+            const focus = {
+              documentFocusedAtStart: document.hasFocus(),
+              documentFocusedAtEnd: false,
+              triggerFocusedAtStart: document.activeElement === trigger,
+              triggerFocusedAtEnd: false,
+              tooltipOpenAtStart: tooltip.hasAttribute("open"),
+              tooltipOpenAtEnd: false,
+              invalidated: false,
+            };
+            proof.focusedStop = focus;
+            const invalidate = () => {
+              focus.invalidated = true;
+            };
+            window.addEventListener("blur", invalidate);
+            trigger.addEventListener("focusout", invalidate);
+            finishFocusedStop = () => {
+              focus.documentFocusedAtEnd = document.hasFocus();
+              focus.triggerFocusedAtEnd = document.activeElement === trigger;
+              focus.tooltipOpenAtEnd = tooltip.hasAttribute("open");
+              window.removeEventListener("blur", invalidate);
+              trigger.removeEventListener("focusout", invalidate);
+            };
+          }
+          if (observeTooltips) {
+            tooltipObserver = new MutationObserver((records) => {
+              proof.tooltipChanges += records.filter(
+                (record) =>
+                  record.target instanceof Element &&
+                  record.target.localName === "openclaw-tooltip" &&
+                  (!focusedStop || record.target === tooltip),
+              ).length;
+            });
+            tooltipObserver.observe(document.body, {
+              subtree: true,
+              attributes: true,
+              attributeFilter: ["open"],
+            });
+          }
+          if (counters || observeTranscripts) {
+            observer = new MutationObserver((records) => {
+              if (counters) {
+                for (const record of records) {
+                  const element =
+                    record.target instanceof Element ? record.target : record.target.parentElement;
+                  if (element?.closest(".agent-chat__voice-turns")) {
+                    proof.transcriptDomMutations++;
+                  }
+                  if (
+                    record.type !== "attributes" ||
+                    !(record.target instanceof Element) ||
+                    !record.target.closest("openclaw-microphone-activity")
+                  ) {
+                    continue;
+                  }
+                  if (record.attributeName === "style") {
+                    proof.meterStyleMutations++;
+                  } else if (record.attributeName?.startsWith("data-")) {
+                    proof.meterDataMutations++;
+                  }
                 }
               }
-            }
-            if (!pending.size) {
-              return;
-            }
-            const text = [...document.querySelectorAll(".agent-chat__voice-turn-text")]
-              .map((element) => element.textContent)
-              .join(" ");
-            for (const [token, sentAt] of pending) {
-              if (text.includes(token)) {
-                proof.transcriptLatenciesMs.push(performance.now() - sentAt);
-                pending.delete(token);
+              if (observeTranscripts) {
+                proof.readTranscriptDom();
               }
-            }
-          });
-          observer.observe(document.body, {
-            subtree: true,
-            childList: true,
-            characterData: true,
-            attributes: counters,
-            attributeFilter: counters ? ["style", "data-level", "data-status"] : undefined,
-          });
+            });
+            observer.observe(document.body, {
+              subtree: true,
+              childList: true,
+              characterData: true,
+              attributes: counters,
+              attributeFilter: counters ? ["style", "data-level", "data-status"] : undefined,
+            });
+          }
           if (frames) {
             const tick = (time: number) => {
               proof.frameTimes.push(time);
@@ -248,6 +530,7 @@ export async function installTalkPerfFixture(page: Page, includeCounters: boolea
         },
         stop() {
           observing = false;
+          clearRevealObservation();
           if (timer !== undefined) {
             clearTimeout(timer);
           }
@@ -255,6 +538,11 @@ export async function installTalkPerfFixture(page: Page, includeCounters: boolea
             cancelAnimationFrame(frame);
           }
           observer?.disconnect();
+          tooltipObserver?.disconnect();
+          finishFocusedStop?.();
+          finishFocusedStop = undefined;
+          // Observation ends after CPU sampling, before the native Stop action.
+          finishResponding();
         },
       };
       window.openclawTalkBench = proof;
@@ -280,6 +568,53 @@ export async function installTalkPerfFixture(page: Page, includeCounters: boolea
         return nativeAnalyse.call(this, samples);
       };
       if (counters) {
+        function countObserverCallbacks<
+          Constructor extends
+            | typeof MutationObserver
+            | typeof ResizeObserver
+            | typeof IntersectionObserver,
+        >(
+          constructor: Constructor,
+          counter:
+            | "mutationObserverCallbacks"
+            | "resizeObserverCallbacks"
+            | "intersectionObserverCallbacks",
+        ): Constructor {
+          return new Proxy(constructor, {
+            construct(target, args, newTarget) {
+              const callback: unknown = args[0];
+              if (typeof callback !== "function") {
+                return Reflect.construct(target, args, newTarget);
+              }
+              // Preserve native construction, subclass prototypes, callback receiver, and options.
+              return Reflect.construct(
+                target,
+                [
+                  function (this: unknown, ...notifications: unknown[]) {
+                    if (observing) {
+                      proof[counter]++;
+                    }
+                    Reflect.apply(callback, this, notifications);
+                  },
+                  ...args.slice(1),
+                ],
+                newTarget,
+              );
+            },
+          });
+        }
+        window.MutationObserver = countObserverCallbacks(
+          window.MutationObserver,
+          "mutationObserverCallbacks",
+        );
+        window.ResizeObserver = countObserverCallbacks(
+          window.ResizeObserver,
+          "resizeObserverCallbacks",
+        );
+        window.IntersectionObserver = countObserverCallbacks(
+          window.IntersectionObserver,
+          "intersectionObserverCallbacks",
+        );
         const interval = window.setInterval.bind(window);
         const timeout = window.setTimeout.bind(window);
         const raf = window.requestAnimationFrame.bind(window);
@@ -390,7 +725,7 @@ export async function installTalkPerfFixture(page: Page, includeCounters: boolea
         value: FakePeerConnection,
       });
     },
-    { counters: includeCounters },
+    { counters: includeCounters, suspendAudio: suspendNativeAudio },
   );
   await page.route("https://api.openai.com/v1/realtime/calls", (route) =>
     route.fulfill({ status: 200, contentType: "application/sdp", body: "answer-sdp" }),

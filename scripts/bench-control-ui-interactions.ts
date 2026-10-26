@@ -82,7 +82,6 @@ const { values } = parseArgs({
     "projection-counts": { type: "boolean", default: false },
     "data-pages": { type: "boolean", default: false },
     "retained-heap": { type: "boolean", default: false },
-    headed: { type: "boolean", default: false },
   },
 });
 const trace = values.trace || values["selector-stats"];
@@ -425,7 +424,6 @@ if (values["process-wakeups"]) {
 const browserExecutable = resolvePlaywrightChromiumExecutablePath(chromium.executablePath());
 const browser = await chromium.launch({
   executablePath: browserExecutable,
-  headless: !values.headed,
 });
 
 async function launchNativeVisibilityContext() {
@@ -439,6 +437,8 @@ async function launchNativeVisibilityContext() {
       "--no-default-browser-check",
       "--password-store=basic",
       "--use-mock-keychain",
+      // Full Chrome headless still hides a natively minimized window; the headless shell does not.
+      "--headless=new",
       "about:blank",
     ],
     { stdio: ["ignore", "ignore", "pipe"] },
@@ -643,7 +643,6 @@ try {
             }
           : false,
         preferences: { lobsterPetVisits: false },
-        headed: values.headed,
         invalidationTracking:
           trace && (values["invalidation-tracking"] || values["selector-stats"]),
         selectorStats: values["selector-stats"],
@@ -723,16 +722,13 @@ try {
         for (const [bundle, slot] of slots) {
           const artifactPrefix = `${viewport.name}-${theme}-${scenario.id}-${pair + 1}-${bundle}`;
           const nativeVisibility =
-            scenario.visibility === "hidden" && values.headed
-              ? await launchNativeVisibilityContext()
-              : undefined;
+            scenario.visibility === "hidden" ? await launchNativeVisibilityContext() : undefined;
           const observationBrowser =
             scenario.observationBrowser && !nativeVisibility
               ? await launchControlUiObservationBrowser({
                   viewport: { width: viewport.width, height: viewport.height },
                   artifactDir,
                   artifactPrefix,
-                  headless: !values.headed,
                   colorScheme: theme,
                   isMobile: viewport.name === "mobile",
                   hasTouch: viewport.name === "mobile",
@@ -848,29 +844,32 @@ try {
               owners: [],
             });
             const boardResponse = createProjectionBoardResponses();
+            const defaultRequestHandlers: Record<string, (params: unknown) => unknown> = {
+              ...(scenario.projectionFamily
+                ? {
+                    "board.get": (params: unknown) => {
+                      if (!isRecord(params)) {
+                        throw new Error("Expected board.get parameters");
+                      }
+                      return boardResponse(params);
+                    },
+                  }
+                : {}),
+              "sessions.list": (params: unknown) => {
+                if (!isRecord(params)) {
+                  throw new Error("Expected sessions.list query parameters");
+                }
+                return sessions.list(params).result;
+              },
+            };
             // Keep the same readiness contract with a timeout scaled for intentional throttling.
             const gateway = await installMockGateway(
               page,
               { ...fixture, awaitInitialRoster: false },
               {
                 requestHandlers: {
-                  ...(scenario.projectionFamily
-                    ? {
-                        "board.get": (params: unknown) => {
-                          if (!isRecord(params)) {
-                            throw new Error("Expected board.get parameters");
-                          }
-                          return boardResponse(params);
-                        },
-                      }
-                    : {}),
-                  "sessions.list": (params) => {
-                    if (!isRecord(params)) {
-                      throw new Error("Expected sessions.list query parameters");
-                    }
-                    return sessions.list(params).result;
-                  },
-                  ...scenario.createRequestHandlers?.(),
+                  ...defaultRequestHandlers,
+                  ...scenario.createRequestHandlers?.(defaultRequestHandlers),
                 },
               },
             );
@@ -975,8 +974,7 @@ try {
                 windowId,
                 bounds: { windowState: "minimized" },
               });
-              // Headless Chromium accepts minimization without hiding the page.
-              // A frozen renderer would make this idle measurement meaningless.
+              // Never simulate hidden: an unhidden or frozen renderer would make this idle measurement meaningless.
               const hidden = await page
                 .waitForFunction(() => document.visibilityState === "hidden", undefined, {
                   timeout: 1_000,
@@ -988,7 +986,7 @@ try {
                 );
               if (!hidden) {
                 throw new ScenarioSkipped(
-                  "Native window minimization did not hide the page; use --headed on a windowed host for hidden-idle proof.",
+                  "Native window minimization did not hide the page; this Chromium build cannot produce hidden-idle proof.",
                 );
               }
             }
