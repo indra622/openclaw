@@ -1,0 +1,132 @@
+name: Reproduce macOS tab state 183926
+
+on:
+  push:
+    branches: [repro/macos-tab-state-183926]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repro-183926-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  reproduce:
+    if: github.repository == 'indra622/openclaw'
+    runs-on: xcode-27
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-node-env
+        with:
+          node-version: '24.22.1'
+          install-bun: 'false'
+          install-deps: 'false'
+          cache-mode: 'off'
+      - name: Record exact source and qualified environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/repro-183926/logs"
+          {
+            git rev-parse HEAD
+            sw_vers
+            uname -m
+            xcodebuild -version
+            xcodebuild -checkFirstLaunchStatus
+            xcrun swift --version
+            node --version
+            pnpm --version
+            sysctl hw.memsize hw.logicalcpu
+            df -h "$RUNNER_TEMP"
+            echo '9e3b2df1a77a601d7d0aae854d3640d6a01259031cb7d45fc3353c524315520f  apps/macos/Tests/OpenClawIPCTests/DashboardNativeBrowserReproTests.swift' | shasum -a 256 -c -
+          } 2>&1 | tee "$RUNNER_TEMP/repro-183926/logs/environment.log"
+      - name: Prepare pinned native dependencies and assets
+        shell: bash
+        run: |
+          set +e
+          set -uo pipefail
+          logs="$RUNNER_TEMP/repro-183926/logs"
+          (
+            set -e
+            pnpm install --frozen-lockfile --ignore-scripts --optional \
+              --filter '@openclaw/mermaid-renderer...' \
+              --filter '@openclaw/gateway-protocol...' --filter 'openclaw...'
+            node scripts/prepare-apple-mermaid.mjs
+          ) > >(tee "$logs/dependencies.stdout") 2> >(tee "$logs/dependencies.stderr" >&2)
+          code=$?
+          wait
+          printf '%s\n' "$code" > "$logs/dependencies.exit"
+          exit "$code"
+      - name: Build tests without running the suite
+        shell: bash
+        run: |
+          set +e
+          set -uo pipefail
+          logs="$RUNNER_TEMP/repro-183926/logs"
+          swift build --package-path apps/macos --build-system native \
+            --scratch-path "$RUNNER_TEMP/repro-183926/build" \
+            --cache-path "$RUNNER_TEMP/repro-183926/cache" \
+            --disable-keychain --disable-netrc --force-resolved-versions \
+            --disable-index-store -Xswiftc -gline-tables-only --jobs 2 --build-tests \
+            > >(tee "$logs/build.stdout") 2> >(tee "$logs/build.stderr" >&2)
+          code=$?
+          wait
+          printf '%s\n' "$code" > "$logs/build.exit"
+          exit "$code"
+      - name: Run only the real WebKit control and hidden regression
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set +e
+          set -uo pipefail
+          logs="$RUNNER_TEMP/repro-183926/logs"
+          node scripts/test-macos-native.mts named \
+            --package-path apps/macos --build-system native \
+            --scratch-path "$RUNNER_TEMP/repro-183926/build" \
+            --skip-build --jobs 2 --filter DashboardNativeBrowserReproTests \
+            --xunit-output "$logs/runtime.xml" \
+            > >(tee "$logs/runtime.stdout") 2> >(tee "$logs/runtime.stderr" >&2)
+          code=$?
+          wait
+          printf '%s\n' "$code" > "$logs/runtime.exit"
+          exit "$code"
+      - name: Record test process settlement
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/repro-183926/logs"
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          logs = pathlib.Path(os.environ['RUNNER_TEMP']) / 'repro-183926/logs'
+          rows = subprocess.check_output(['ps', '-axo', 'pid=,ppid=,comm='], text=True).splitlines()
+          remaining = [row for row in rows
+                       if pathlib.PurePath(row.split(maxsplit=2)[-1]).name == 'OpenClawPackageTests']
+          result = {
+              'sha': os.environ['GITHUB_SHA'],
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'remaining_test_processes': remaining,
+              'exit_codes': {name: (logs / (name + '.exit')).read_text().strip()
+                             for name in ['dependencies', 'build', 'runtime']
+                             if (logs / (name + '.exit')).exists()},
+          }
+          (logs / 'settlement.json').write_text(json.dumps(result, indent=2) + '\n')
+          print(json.dumps(result, indent=2))
+          if remaining:
+              raise SystemExit(1)
+          PY
+      - name: Preserve actual results even when the correct expectation fails
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: repro-183926-${{ github.sha }}
+          path: ${{ runner.temp }}/repro-183926/logs
+          if-no-files-found: warn
+          retention-days: 7
