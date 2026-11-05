@@ -1,0 +1,52 @@
+Retained native runtime output, 2026-11-05. Committed head b2665992303bf4426fb670968540fa9a53c669aa.
+Private host paths and simulator identifier omitted. Synthetic conversations only.
+
+{
+  "devicesAndConfigurations": [
+    {
+      "device": {
+        "architecture": "arm64",
+        "deviceName": "iPhone 17",
+        "modelName": "iPhone 17",
+        "osBuildNumber": "24A434",
+        "osVersion": "27.0",
+        "platform": "iOS Simulator"
+      },
+      "expectedFailures": 0,
+      "failedTests": 0,
+      "passedTests": 1,
+      "skippedTests": 0,
+      "testPlanConfiguration": {
+        "configurationId": "1",
+        "configurationName": "Test Scheme Action"
+      }
+    }
+  ],
+  "environmentDescription": "OpenClawUITests \u00b7 Built with macOS 26.6.2",
+  "expectedFailures": 0,
+  "failedTests": 0,
+  "finishTime": 1793874968.676,
+  "passedTests": 1,
+  "result": "Passed",
+  "runtimeWarnings": [],
+  "skippedTests": 0,
+  "startTime": 1793874872.164,
+  "statistics": [],
+  "testFailures": [],
+  "title": "Test - OpenClawUITests",
+  "topInsights": [],
+  "totalTestCount": 1
+}
+
+XCTest activity excerpts (original order):
+Test Case '-[OpenClawUITests.CommandSessionsMutationUITests testRejectedPinKeepsLoadedSessionsUsable]' started.
+    t =    42.05s Waiting 10.0s for "Opened agent:main:navigation-2" StaticText to exist
+    t =    43.08s     Checking `Expect predicate `existsNoRetry == 1` for object "Opened agent:main:navigation-2" StaticText`
+    t =    43.08s         Checking existence of `"Opened agent:main:navigation-2" StaticText`
+    t =    60.19s Waiting 10.0s for "Opened agent:main:navigation-1" StaticText to exist
+    t =    61.21s     Checking `Expect predicate `existsNoRetry == 1` for object "Opened agent:main:navigation-1" StaticText`
+    t =    61.21s         Checking existence of `"Opened agent:main:navigation-1" StaticText`
+Test Case '-[OpenClawUITests.CommandSessionsMutationUITests testRejectedPinKeepsLoadedSessionsUsable]' passed (62.461 seconds).
+	 Executed 1 test, with 0 failures (0 unexpected) in 62.461 (62.466) seconds
+	 Executed 1 test, with 0 failures (0 unexpected) in 62.461 (62.468) seconds
+	 Executed 1 test, with 0 failures (0 unexpected) in 62.461 (62.470) seconds
