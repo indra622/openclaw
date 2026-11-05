@@ -1,0 +1,52 @@
+{
+  "source_commit": "df5aa27ae39e2eb9c81914102ed0021f6731730b",
+  "test": "AgentWorkspacePaginationUITests/testSuccessfulLoadMoreClearsPreviousPageFailure",
+  "device": "iPhone17 Simulator",
+  "os": "iOS27.0",
+  "xcode": "27.1(27A9275)",
+  "language": "English",
+  "passed": 1,
+  "failed": 0,
+  "skipped": 0,
+  "case_seconds": 182.305,
+  "command_seconds": 212.677,
+  "request_sequence": [
+    {
+      "offset": 0,
+      "limit": null,
+      "count": 250,
+      "failed": false
+    },
+    {
+      "offset": 250,
+      "limit": null,
+      "count": 0,
+      "failed": true
+    },
+    {
+      "offset": 250,
+      "limit": null,
+      "count": 0,
+      "failed": true
+    },
+    {
+      "offset": 250,
+      "limit": null,
+      "count": 1,
+      "failed": false
+    }
+  ],
+  "initial_distinct_delivered_paths": 250,
+  "last_delivered_file": "Summary.md",
+  "native_assertions": [
+    "250 of251 loaded before retries",
+    "First/last original rows retained",
+    "Two failed retries preserve error and offset250",
+    "Successful final file appears once, Load More disappears, old error absent"
+  ],
+  "limits": "Representative native UI checks and fixture paths, not exhaustive per-row UI enumeration. Emulated RPC, not real Gateway filesystem/hardware/App Store.",
+  "images_sha256": {
+    "recovered-directory.png": "27ad152ecc54eae620ae6fd4ea87c9d925c28fc58e7a8bbcb99b0db61e9fef30",
+    "last-file-loaded.png": "f5450d07ae3d96cac36f7650dfdf70698a6204a01565e605547f1621d1038418"
+  }
+}
