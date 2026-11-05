@@ -1,0 +1,35 @@
+{
+  "source_commit": "47a1db818cfe41bc67e64286e5d3516b01153ff9",
+  "test": "AgentWorkspaceFilesUITests/testPreviewDistinguishesReadFailuresFromSizeAndFormat",
+  "device": "iPhone 17 Simulator",
+  "os": "iOS 27.0",
+  "xcode": "27.1 (27A9275)",
+  "language": "English",
+  "passed": 1,
+  "failed": 0,
+  "skipped": 0,
+  "test_case_seconds": 59.797,
+  "command_wall_seconds": 106.399,
+  "six_phases_in_one_case": [
+    "missing",
+    "restored",
+    "too-large",
+    "unsupported",
+    "unavailable",
+    "updated"
+  ],
+  "read_failure_copy": "Could not read this file. Return to Files and reopen it when available.",
+  "assertions_verified_by_passing_test": [
+    "Share disabled on every failed read",
+    "Share enabled on restored and updated content",
+    "Correct size/format guidance preserved",
+    "No private diagnostic rendered",
+    "No stale text or error retained"
+  ],
+  "proof_scope": "Real native client with synthetic loopback RPC; not real Gateway filesystem, physical device or App Store proof",
+  "images_sha256": {
+    "missing-file.png": "28ec78497ad06e9eb3b613dc40533480e28de7742fcedb4c7b9e4816da459d8f",
+    "restored-content.png": "b961d77df72a1d9a401bfa51cffa712bbf42111f5b6d00e378519ae5751c5747",
+    "updated-content.png": "e33daff98e822eb513861d5a1ea7fd6b6deb791c031fe25781404e8bd9a895ec"
+  }
+}
