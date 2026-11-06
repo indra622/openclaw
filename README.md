@@ -1,0 +1,1 @@
+Synthetic Python shared into iOS OpenClaw. Before is illustrative legacy preflight build (composer identical to pinned base), not an exact binary A/B. After is production extension from e0114329e8fa75b0bfff0761816a4df44a26975b, validated in isolated simulator. No Send action performed.
